@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.View
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -29,12 +30,14 @@ class MainActivity : AppCompatActivity() {
 
     private var currentFileUri: Uri? = null
 
-    // Native system file picker contract
+    // Callback used to send selected files back to HTML <input type="file">
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    // Native picker for loading the main HTML file
     private val openHtmlLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
-            // Take persistable permission to reload across launches
             try {
                 val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION
                 contentResolver.takePersistableUriPermission(uri, takeFlags)
@@ -47,6 +50,30 @@ class MainActivity : AppCompatActivity() {
 
             loadHtmlFromUri(uri)
         }
+    }
+
+    // Picker triggered by the HTML file input (e.g., JSON import)
+    private val webFileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (filePathCallback == null) return@registerForActivityResult
+
+        val resultUris: Array<Uri>? = if (result.resultCode == RESULT_OK && result.data != null) {
+            val data = result.data
+            val clipData = data?.clipData
+            if (clipData != null) {
+                Array(clipData.itemCount) { i -> clipData.getItemAt(i).uri }
+            } else if (data?.data != null) {
+                arrayOf(data.data!!)
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+
+        filePathCallback?.onReceiveValue(resultUris)
+        filePathCallback = null
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -63,7 +90,6 @@ class MainActivity : AppCompatActivity() {
         configureWebView()
 
         btnPickFile.setOnClickListener {
-            // Open system picker filtering for HTML documents
             openHtmlLauncher.launch(arrayOf("text/html", "text/*"))
         }
 
@@ -89,7 +115,30 @@ class MainActivity : AppCompatActivity() {
         s.displayZoomControls = false
 
         webView.webViewClient = WebViewClient()
-        webView.webChromeClient = WebChromeClient()
+
+        // Hook up the HTML file input dialog
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                mWebView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                this@MainActivity.filePathCallback?.onReceiveValue(null)
+                this@MainActivity.filePathCallback = filePathCallback
+
+                return try {
+                    val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                        type = "*/*"
+                    }
+                    webFileChooserLauncher.launch(intent)
+                    true
+                } catch (e: Exception) {
+                    this@MainActivity.filePathCallback?.onReceiveValue(null)
+                    this@MainActivity.filePathCallback = null
+                    false
+                }
+            }
+        }
     }
 
     private fun loadHtmlFromUri(uri: Uri) {
@@ -98,7 +147,6 @@ class MainActivity : AppCompatActivity() {
                 val reader = BufferedReader(InputStreamReader(inputStream))
                 val htmlContent = reader.readText()
 
-                // Render HTML into the WebView
                 webView.loadDataWithBaseURL(
                     uri.toString(),
                     htmlContent,
