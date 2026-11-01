@@ -1,11 +1,17 @@
 package com.example.htmlrunner
 
 import android.annotation.SuppressLint
+import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Base64
 import android.view.View
+import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -19,6 +25,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.io.OutputStream
 
 class MainActivity : AppCompatActivity() {
 
@@ -29,11 +36,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnReload: Button
 
     private var currentFileUri: Uri? = null
-
-    // Callback used to send selected files back to HTML <input type="file">
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    // Native picker for loading the main HTML file
+    // Native file picker to select and load an HTML file
     private val openHtmlLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -44,15 +49,14 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {}
 
             currentFileUri = uri
-            val displayName = getFileName(uri)
-            textFileStatus.text = displayName
+            textFileStatus.text = getFileName(uri)
             btnReload.visibility = View.VISIBLE
 
             loadHtmlFromUri(uri)
         }
     }
 
-    // Picker triggered by the HTML file input (e.g., JSON import)
+    // Picker triggered by <input type="file"> inside the HTML
     private val webFileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -114,9 +118,17 @@ class MainActivity : AppCompatActivity() {
         s.builtInZoomControls = true
         s.displayZoomControls = false
 
-        webView.webViewClient = WebViewClient()
+        // Bridge to allow JS blob downloads to call native code
+        webView.addJavascriptInterface(BlobDownloadInterface(), "AndroidDownloader")
 
-        // Hook up the HTML file input dialog
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                injectBlobDownloadHandler()
+            }
+        }
+
+        // File upload chooser handler
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 mWebView: WebView?,
@@ -138,6 +150,99 @@ class MainActivity : AppCompatActivity() {
                     false
                 }
             }
+        }
+
+        // Intercept standard data: URI downloads
+        webView.setDownloadListener { url, _, contentDisposition, mimetype, _ ->
+            if (url.startsWith("data:")) {
+                saveDataUriToDownloads(url, mimetype)
+            }
+        }
+    }
+
+    // Injects a JS interceptor so blob: and data: download links send bytes to Android
+    private fun injectBlobDownloadHandler() {
+        val script = """
+            (function() {
+                var originalClick = HTMLAnchorElement.prototype.click;
+                HTMLAnchorElement.prototype.click = function() {
+                    if (this.download && this.href) {
+                        if (this.href.startsWith("blob:") || this.href.startsWith("data:")) {
+                            var filename = this.download || "exported_file";
+                            var xhr = new XMLHttpRequest();
+                            xhr.open('GET', this.href, true);
+                            xhr.responseType = 'blob';
+                            xhr.onload = function(e) {
+                                if (this.status == 200 || (this.status == 0 && xhr.response)) {
+                                    var blob = this.response;
+                                    var reader = new FileReader();
+                                    reader.readAsDataURL(blob);
+                                    reader.onloadend = function() {
+                                        var base64data = reader.result;
+                                        window.AndroidDownloader.saveBase64File(base64data, filename);
+                                    }
+                                }
+                            };
+                            xhr.send();
+                            return;
+                        }
+                    }
+                    originalClick.apply(this, arguments);
+                };
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(script, null)
+    }
+
+    inner class BlobDownloadInterface {
+        @JavascriptInterface
+        fun saveBase64File(base64Data: String, filename: String) {
+            runOnUiThread {
+                try {
+                    val cleanBase64 = if (base64Data.contains(",")) {
+                        base64Data.substringAfter(",")
+                    } else {
+                        base64Data
+                    }
+                    val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                    saveBytesToDownloads(bytes, filename)
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Download failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun saveDataUriToDownloads(dataUri: String, mimeType: String) {
+        try {
+            val base64Part = dataUri.substringAfter(",")
+            val bytes = Base64.decode(base64Part, Base64.DEFAULT)
+            val extension = if (mimeType.contains("json")) "json" else "txt"
+            val filename = "export_${System.currentTimeMillis()}.$extension"
+            saveBytesToDownloads(bytes, filename)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Failed to export: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun saveBytesToDownloads(bytes: ByteArray, filename: String) {
+        try {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+            }
+
+            val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (uri != null) {
+                val outputStream: OutputStream? = contentResolver.openOutputStream(uri)
+                outputStream?.use { it.write(bytes) }
+                Toast.makeText(this, "Saved to Downloads: $filename", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Save error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
