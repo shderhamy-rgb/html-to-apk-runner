@@ -4,34 +4,88 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:gravity="center"
-    android:background="#121212"
-    android:padding="24dp">
+    android:background="#121212">
 
-    <TextView
-        android:id="@+id/text_title"
-        android:layout_width="wrap_content"
+    <!-- Top Control Bar -->
+    <LinearLayout
+        android:id="@+id/top_bar"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="HTML Runner"
-        android:textColor="#FFFFFF"
-        android:textSize="26sp"
-        android:textStyle="bold" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="12dp"
+        android:background="#1E1E1E">
 
-    <TextView
-        android:id="@+id/text_subtitle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="Engine Initialized Successfully"
-        android:textColor="#03DAC5"
-        android:textSize="16sp" />
+        <Button
+            android:id="@+id/btn_pick_file"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Open HTML"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            android:backgroundTint="#6200EE"
+            android:textColor="#FFFFFF" />
 
+        <TextView
+            android:id="@+id/text_file_status"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="8dp"
+            android:singleLine="true"
+            android:ellipsize="middle"
+            android:text="No file selected"
+            android:textColor="#AAAAAA"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btn_reload"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Reload"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            android:visibility="gone"
+            android:backgroundTint="#03DAC5"
+            android:textColor="#000000" />
+    </LinearLayout>
+
+    <!-- Placeholder welcome box when no file is loaded -->
+    <LinearLayout
+        android:id="@+id/layout_welcome"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="24dp">
+
+        <TextView
+            android:id="@+id/text_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="HTML Runner"
+            android:textColor="#FFFFFF"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/text_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Tap 'Open HTML' above to run your local page"
+            android:textColor="#03DAC5"
+            android:textSize="15sp" />
+    </LinearLayout>
+
+    <!-- The active WebView container -->
     <WebView
         android:id="@+id/main_webview"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="20dp"
         android:visibility="gone" />
 
 </LinearLayout>
