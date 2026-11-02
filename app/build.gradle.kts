@@ -8,7 +8,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.htmlrunner"
+        applicationId = "com.readingstudio.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
