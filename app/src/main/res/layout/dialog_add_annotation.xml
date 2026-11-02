@@ -1,60 +1,72 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:padding="20dp"
-    android:background="#FFFFFF">
+    android:background="#FAF7F0">
 
     <TextView
+        android:id="@+id/tvAnnotateWord"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="New Annotation"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:textColor="#111827" />
+        android:background="#FFE9A8"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="4dp"
+        android:textColor="#423002"
+        android:fontFamily="serif"
+        android:textSize="20sp"
+        android:textStyle="bold" />
 
-    <TextView
-        android:id="@+id/tvSelectedTerm"
+    <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:layout_marginBottom="14dp"
-        android:padding="12dp"
-        android:background="#F3F4F6"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:textColor="#0F766E" />
+        android:layout_marginTop="16dp"
+        android:hint="Definition, phonetic guide, or Persian gloss"
+        app:boxBackgroundColor="#FFFFFF"
+        app:boxStrokeColor="#B8860B"
+        app:boxCornerRadiusTopStart="8dp"
+        app:boxCornerRadiusTopEnd="8dp"
+        app:boxCornerRadiusBottomStart="8dp"
+        app:boxCornerRadiusBottomEnd="8dp">
 
-    <EditText
-        android:id="@+id/etDefinition"
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etNoteContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="top|start"
+            android:minLines="3"
+            android:textColor="#14120E"
+            android:textSize="15sp" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:background="#F9FAFB"
-        android:padding="12dp"
-        android:hint="Definition or Persian equivalent"
-        android:textColor="#111827"
-        android:textColorHint="#9CA3AF"
-        android:textSize="15sp" />
+        android:orientation="horizontal"
+        android:layout_marginTop="16dp">
 
-    <EditText
-        android:id="@+id/etNote"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="18dp"
-        android:background="#F9FAFB"
-        android:padding="12dp"
-        android:hint="Usage note or nuance (optional)"
-        android:textColor="#111827"
-        android:textColorHint="#9CA3AF"
-        android:textSize="15sp" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDeleteNote"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#B93829"
+            android:text="Delete" />
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnSaveAnnotation"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:backgroundTint="#0F766E"
-        android:text="Save Annotation"
-        android:textColor="#FFFFFF" />
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSaveNote"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:backgroundTint="#B8860B"
+            android:textColor="#FAF7F0"
+            android:text="Save Note" />
+    </LinearLayout>
+
 </LinearLayout>

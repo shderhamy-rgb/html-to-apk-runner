@@ -1,9 +1,10 @@
 ﻿<resources>
     <style name="Theme.ReadingStudio" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">#0F766E</item>
-        <item name="colorPrimaryVariant">#115E59</item>
+        <item name="colorPrimary">#B8860B</item>
+        <item name="colorPrimaryVariant">#8C6708</item>
         <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="android:statusBarColor">#0F766E</item>
-        <item name="android:windowBackground">#F3F4F6</item>
+        <item name="android:statusBarColor">#FAF7F0</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">#FAF7F0</item>
     </style>
 </resources>
