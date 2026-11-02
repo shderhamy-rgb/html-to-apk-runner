@@ -4,9 +4,6 @@ import android.graphics.Color
 import android.os.Bundle
 import android.text.Spannable
 import android.text.style.BackgroundColorSpan
-import android.view.ActionMode
-import android.view.Menu
-import android.view.MenuItem
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -26,7 +23,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var etSessionTitle: EditText
     private lateinit var etReadingText: EditText
-    private lateinit var tvAnnotationCount: TextView
+    private lateinit var btnAnnotateSelection: Button
     private lateinit var btnExport: Button
 
     private val annotations = mutableListOf<AnnotationItem>()
@@ -37,55 +34,36 @@ class MainActivity : AppCompatActivity() {
 
         etSessionTitle = findViewById(R.id.etSessionTitle)
         etReadingText = findViewById(R.id.etReadingText)
-        tvAnnotationCount = findViewById(R.id.tvAnnotationCount)
+        btnAnnotateSelection = findViewById(R.id.btnAnnotateSelection)
         btnExport = findViewById(R.id.btnExport)
 
-        setupTextSelectionAction()
+        btnAnnotateSelection.setOnClickListener {
+            val start = etReadingText.selectionStart
+            val end = etReadingText.selectionEnd
 
-        btnExport.setOnClickListener {
-            val title = etSessionTitle.text.toString().trim()
-            val text = etReadingText.text.toString().trim()
-
-            if (text.isEmpty()) {
-                Toast.makeText(this, "Please enter some text first", Toast.LENGTH_SHORT).show()
+            if (start < 0 || end <= start) {
+                Toast.makeText(this, "Select a word or phrase in the text first", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
-            Toast.makeText(
-                this,
-                "Ready! Saved ${annotations.size} annotations for: $title",
-                Toast.LENGTH_LONG
-            ).show()
+            val fullText = etReadingText.text.toString()
+            val term = fullText.substring(start, end).trim()
+
+            if (term.isEmpty()) {
+                Toast.makeText(this, "Highlighted selection is empty", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            showAnnotationDialog(term, start, end)
         }
-    }
 
-    private fun setupTextSelectionAction() {
-        etReadingText.customSelectionActionModeCallback = object : ActionMode.Callback {
-            override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
-                menu?.add(0, 1001, 0, "Annotate")
-                return true
+        btnExport.setOnClickListener {
+            val title = etSessionTitle.text.toString().trim()
+            if (title.isEmpty()) {
+                Toast.makeText(this, "Please enter a session title", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
-
-            override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean {
-                return false
-            }
-
-            override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean {
-                if (item?.itemId == 1001) {
-                    val start = etReadingText.selectionStart
-                    val end = etReadingText.selectionEnd
-
-                    if (start >= 0 && end > start) {
-                        val selectedTerm = etReadingText.text.toString().substring(start, end)
-                        showAnnotationDialog(selectedTerm, start, end)
-                    }
-                    mode?.finish()
-                    return true
-                }
-                return false
-            }
-
-            override fun onDestroyActionMode(mode: ActionMode?) {}
+            Toast.makeText(this, "Session '$title' ready with ${annotations.size} annotations!", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -99,14 +77,14 @@ class MainActivity : AppCompatActivity() {
         val etNote = view.findViewById<EditText>(R.id.etNote)
         val btnSave = view.findViewById<Button>(R.id.btnSaveAnnotation)
 
-        tvTerm.text = "\"$term\""
+        tvTerm.text = term
 
         btnSave.setOnClickListener {
             val definition = etDefinition.text.toString().trim()
             val note = etNote.text.toString().trim()
 
             if (definition.isEmpty()) {
-                etDefinition.error = "Definition cannot be empty"
+                etDefinition.error = "Definition required"
                 return@setOnClickListener
             }
 
@@ -114,15 +92,14 @@ class MainActivity : AppCompatActivity() {
 
             val spannable = etReadingText.text as Spannable
             spannable.setSpan(
-                BackgroundColorSpan(Color.parseColor("#FFF3CD")),
+                BackgroundColorSpan(Color.parseColor("#FEF08A")),
                 start,
                 end,
                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
             )
 
-            tvAnnotationCount.text = "${annotations.size} annotations added"
-
             dialog.dismiss()
+            Toast.makeText(this, "Annotated: $term", Toast.LENGTH_SHORT).show()
         }
 
         dialog.show()
