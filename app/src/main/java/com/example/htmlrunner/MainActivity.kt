@@ -1,293 +1,130 @@
-package com.example.htmlrunner
+﻿package com.example.htmlrunner
 
-import android.annotation.SuppressLint
-import android.content.ContentValues
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
+import android.graphics.Color
 import android.os.Bundle
-import android.os.Environment
-import android.provider.MediaStore
-import android.provider.OpenableColumns
-import android.util.Base64
-import android.view.View
-import android.webkit.JavascriptInterface
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.text.Spannable
+import android.text.style.BackgroundColorSpan
+import android.view.ActionMode
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.Button
-import android.widget.LinearLayout
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStream
+import com.google.android.material.bottomsheet.BottomSheetDialog
+
+data class AnnotationItem(
+    val term: String,
+    val startIndex: Int,
+    val endIndex: Int,
+    val definition: String,
+    val note: String
+)
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var webView: WebView
-    private lateinit var layoutWelcome: LinearLayout
-    private lateinit var textFileStatus: TextView
-    private lateinit var btnPickFile: Button
-    private lateinit var btnReload: Button
+    private lateinit var etSessionTitle: EditText
+    private lateinit var etReadingText: EditText
+    private lateinit var tvAnnotationCount: TextView
+    private lateinit var btnExport: Button
 
-    private var currentFileUri: Uri? = null
-    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private val annotations = mutableListOf<AnnotationItem>()
 
-    // Native file picker to select and load an HTML file
-    private val openHtmlLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            try {
-                val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION
-                contentResolver.takePersistableUriPermission(uri, takeFlags)
-            } catch (_: Exception) {}
-
-            currentFileUri = uri
-            textFileStatus.text = getFileName(uri)
-            btnReload.visibility = View.VISIBLE
-
-            loadHtmlFromUri(uri)
-        }
-    }
-
-    // Picker triggered by <input type="file"> inside the HTML
-    private val webFileChooserLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (filePathCallback == null) return@registerForActivityResult
-
-        val resultUris: Array<Uri>? = if (result.resultCode == RESULT_OK && result.data != null) {
-            val data = result.data
-            val clipData = data?.clipData
-            if (clipData != null) {
-                Array(clipData.itemCount) { i -> clipData.getItemAt(i).uri }
-            } else if (data?.data != null) {
-                arrayOf(data.data!!)
-            } else {
-                null
-            }
-        } else {
-            null
-        }
-
-        filePathCallback?.onReceiveValue(resultUris)
-        filePathCallback = null
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        webView = findViewById(R.id.main_webview)
-        layoutWelcome = findViewById(R.id.layout_welcome)
-        textFileStatus = findViewById(R.id.text_file_status)
-        btnPickFile = findViewById(R.id.btn_pick_file)
-        btnReload = findViewById(R.id.btn_reload)
+        etSessionTitle = findViewById(R.id.etSessionTitle)
+        etReadingText = findViewById(R.id.etReadingText)
+        tvAnnotationCount = findViewById(R.id.tvAnnotationCount)
+        btnExport = findViewById(R.id.btnExport)
 
-        configureWebView()
+        setupTextSelectionAction()
 
-        btnPickFile.setOnClickListener {
-            openHtmlLauncher.launch(arrayOf("text/html", "text/*"))
-        }
+        btnExport.setOnClickListener {
+            val title = etSessionTitle.text.toString().trim()
+            val text = etReadingText.text.toString().trim()
 
-        btnReload.setOnClickListener {
-            currentFileUri?.let { uri ->
-                loadHtmlFromUri(uri)
-                Toast.makeText(this, "Reloaded", Toast.LENGTH_SHORT).show()
+            if (text.isEmpty()) {
+                Toast.makeText(this, "Please enter some text first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
+
+            Toast.makeText(
+                this,
+                "Ready! Saved ${annotations.size} annotations for: $title",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun configureWebView() {
-        val s: WebSettings = webView.settings
-        s.javaScriptEnabled = true
-        s.domStorageEnabled = true
-        s.databaseEnabled = true
-        s.allowFileAccess = true
-        s.allowContentAccess = true
-        s.useWideViewPort = true
-        s.loadWithOverviewMode = true
-        s.builtInZoomControls = true
-        s.displayZoomControls = false
-
-        // Bridge to allow JS blob downloads to call native code
-        webView.addJavascriptInterface(BlobDownloadInterface(), "AndroidDownloader")
-
-        webView.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView?, url: String?) {
-                super.onPageFinished(view, url)
-                injectBlobDownloadHandler()
+    private fun setupTextSelectionAction() {
+        etReadingText.customSelectionActionModeCallback = object : ActionMode.Callback {
+            override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+                menu?.add(0, 1001, 0, "Annotate")
+                return true
             }
-        }
 
-        // File upload chooser handler
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onShowFileChooser(
-                mWebView: WebView?,
-                filePathCallback: ValueCallback<Array<Uri>>?,
-                fileChooserParams: FileChooserParams?
-            ): Boolean {
-                this@MainActivity.filePathCallback?.onReceiveValue(null)
-                this@MainActivity.filePathCallback = filePathCallback
+            override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+                return false
+            }
 
-                return try {
-                    val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                        type = "*/*"
+            override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean {
+                if (item?.itemId == 1001) {
+                    val start = etReadingText.selectionStart
+                    val end = etReadingText.selectionEnd
+
+                    if (start >= 0 && end > start) {
+                        val selectedTerm = etReadingText.text.toString().substring(start, end)
+                        showAnnotationDialog(selectedTerm, start, end)
                     }
-                    webFileChooserLauncher.launch(intent)
-                    true
-                } catch (e: Exception) {
-                    this@MainActivity.filePathCallback?.onReceiveValue(null)
-                    this@MainActivity.filePathCallback = null
-                    false
+                    mode?.finish()
+                    return true
                 }
+                return false
             }
-        }
 
-        // Intercept standard data: URI downloads
-        webView.setDownloadListener { url, _, contentDisposition, mimetype, _ ->
-            if (url.startsWith("data:")) {
-                saveDataUriToDownloads(url, mimetype)
-            }
+            override fun onDestroyActionMode(mode: ActionMode?) {}
         }
     }
 
-    // Injects a JS interceptor so blob: and data: download links send bytes to Android
-    private fun injectBlobDownloadHandler() {
-        val script = """
-            (function() {
-                var originalClick = HTMLAnchorElement.prototype.click;
-                HTMLAnchorElement.prototype.click = function() {
-                    if (this.download && this.href) {
-                        if (this.href.startsWith("blob:") || this.href.startsWith("data:")) {
-                            var filename = this.download || "exported_file";
-                            var xhr = new XMLHttpRequest();
-                            xhr.open('GET', this.href, true);
-                            xhr.responseType = 'blob';
-                            xhr.onload = function(e) {
-                                if (this.status == 200 || (this.status == 0 && xhr.response)) {
-                                    var blob = this.response;
-                                    var reader = new FileReader();
-                                    reader.readAsDataURL(blob);
-                                    reader.onloadend = function() {
-                                        var base64data = reader.result;
-                                        window.AndroidDownloader.saveBase64File(base64data, filename);
-                                    }
-                                }
-                            };
-                            xhr.send();
-                            return;
-                        }
-                    }
-                    originalClick.apply(this, arguments);
-                };
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(script, null)
-    }
+    private fun showAnnotationDialog(term: String, start: Int, end: Int) {
+        val dialog = BottomSheetDialog(this)
+        val view = layoutInflater.inflate(R.layout.dialog_add_annotation, null)
+        dialog.setContentView(view)
 
-    inner class BlobDownloadInterface {
-        @JavascriptInterface
-        fun saveBase64File(base64Data: String, filename: String) {
-            runOnUiThread {
-                try {
-                    val cleanBase64 = if (base64Data.contains(",")) {
-                        base64Data.substringAfter(",")
-                    } else {
-                        base64Data
-                    }
-                    val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
-                    saveBytesToDownloads(bytes, filename)
-                } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "Download failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
+        val tvTerm = view.findViewById<TextView>(R.id.tvSelectedTerm)
+        val etDefinition = view.findViewById<EditText>(R.id.etDefinition)
+        val etNote = view.findViewById<EditText>(R.id.etNote)
+        val btnSave = view.findViewById<Button>(R.id.btnSaveAnnotation)
 
-    private fun saveDataUriToDownloads(dataUri: String, mimeType: String) {
-        try {
-            val base64Part = dataUri.substringAfter(",")
-            val bytes = Base64.decode(base64Part, Base64.DEFAULT)
-            val extension = if (mimeType.contains("json")) "json" else "txt"
-            val filename = "export_${System.currentTimeMillis()}.$extension"
-            saveBytesToDownloads(bytes, filename)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Failed to export: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
+        tvTerm.text = "\"$term\""
 
-    private fun saveBytesToDownloads(bytes: ByteArray, filename: String) {
-        try {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                }
+        btnSave.setOnClickListener {
+            val definition = etDefinition.text.toString().trim()
+            val note = etNote.text.toString().trim()
+
+            if (definition.isEmpty()) {
+                etDefinition.error = "Definition cannot be empty"
+                return@setOnClickListener
             }
 
-            val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            if (uri != null) {
-                val outputStream: OutputStream? = contentResolver.openOutputStream(uri)
-                outputStream?.use { it.write(bytes) }
-                Toast.makeText(this, "Saved to Downloads: $filename", Toast.LENGTH_LONG).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Save error: ${e.message}", Toast.LENGTH_SHORT).show()
+            annotations.add(AnnotationItem(term, start, end, definition, note))
+
+            val spannable = etReadingText.text as Spannable
+            spannable.setSpan(
+                BackgroundColorSpan(Color.parseColor("#FFF3CD")),
+                start,
+                end,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+
+            tvAnnotationCount.text = "${annotations.size} annotations added"
+
+            dialog.dismiss()
         }
-    }
 
-    private fun loadHtmlFromUri(uri: Uri) {
-        try {
-            contentResolver.openInputStream(uri)?.use { inputStream ->
-                val reader = BufferedReader(InputStreamReader(inputStream))
-                val htmlContent = reader.readText()
-
-                webView.loadDataWithBaseURL(
-                    uri.toString(),
-                    htmlContent,
-                    "text/html",
-                    "UTF-8",
-                    null
-                )
-
-                layoutWelcome.visibility = View.GONE
-                webView.visibility = View.VISIBLE
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Failed to load file: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun getFileName(uri: Uri): String {
-        var name = "Selected File"
-        val cursor = contentResolver.query(uri, null, null, null, null)
-        cursor?.use {
-            if (it.moveToFirst()) {
-                val index = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (index != -1) {
-                    name = it.getString(index)
-                }
-            }
-        }
-        return name
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (this::webView.isInitialized && webView.visibility == View.VISIBLE && webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            super.onBackPressed()
-        }
+        dialog.show()
     }
 }
