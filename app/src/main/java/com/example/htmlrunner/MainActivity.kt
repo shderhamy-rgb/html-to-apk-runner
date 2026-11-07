@@ -1,8 +1,10 @@
 ﻿package com.example.htmlrunner
 
 import android.app.AlertDialog
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
@@ -13,11 +15,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import com.google.gson.GsonBuilder
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.text.SimpleDateFormat
+import java.util.*
 
-data class WordItem(
+data class LexiExport(
+    val schemaVersion: Int = 1,
+    val exportedAt: String = "",
+    val items: List<LexiItem> = emptyList()
+)
+
+data class LexiItem(
+    var id: String = "v-" + UUID.randomUUID().toString().substring(0, 8),
     var term: String = "",
     var definition: String = "",
     var examples: MutableList<String> = mutableListOf()
@@ -25,16 +36,20 @@ data class WordItem(
 
 class MainActivity : AppCompatActivity() {
 
-    private val wordList = mutableListOf<WordItem>()
-    private val gson = Gson()
+    private val wordList = mutableListOf<LexiItem>()
+    private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
+    private var isDarkMode = true
     private var exportIncompleteOnly = false
 
-    private lateinit var etSearch: EditText
+    private lateinit var rootLayout: LinearLayout
+    private lateinit var tvTitle: TextView
     private lateinit var tvCountBadge: TextView
-    private lateinit var wordsContainer: LinearLayout
+    private lateinit var btnToggleTheme: MaterialButton
+    private lateinit var etSearch: EditText
     private lateinit var btnAddWord: MaterialButton
     private lateinit var btnExport: MaterialButton
     private lateinit var btnImport: MaterialButton
+    private lateinit var wordsContainer: LinearLayout
 
     private val exportJsonLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
         uri?.let { saveExportFile(it) }
@@ -47,46 +62,49 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val root = LinearLayout(this).apply {
+        rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#FAF7F0"))
-            setPadding(32, 48, 32, 32)
+            setPadding(36, 48, 36, 32)
         }
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 0, 0, 24)
+            setPadding(0, 0, 0, 20)
         }
-        val titleView = TextView(this).apply {
+        tvTitle = TextView(this).apply {
             text = "LexiKeep"
             textSize = 24f
             setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor("#14120E"))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         tvCountBadge = TextView(this).apply {
-            text = "0 items"
-            textSize = 14f
-            setTextColor(Color.parseColor("#655E52"))
-            setPadding(16, 8, 16, 8)
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(20, 10, 20, 10)
         }
-        header.addView(titleView)
+        btnToggleTheme = MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
+            text = "◐ Theme"
+            textSize = 12f
+            setOnClickListener {
+                isDarkMode = !isDarkMode
+                applyTheme()
+                renderList(etSearch.text?.toString()?.trim() ?: "")
+            }
+        }
+        header.addView(tvTitle)
         header.addView(tvCountBadge)
-        root.addView(header)
+        header.addView(btnToggleTheme)
+        rootLayout.addView(header)
 
-        val searchBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 0, 0, 24)
-        }
         etSearch = EditText(this).apply {
             hint = "Search terms, definitions, examples..."
             textSize = 14f
-            setBackgroundColor(Color.WHITE)
-            setPadding(24, 20, 24, 20)
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            setPadding(28, 22, 28, 22)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 0, 0, 24)
+            }
         }
-        searchBar.addView(etSearch)
-        root.addView(searchBar)
+        rootLayout.addView(etSearch)
 
         val actionsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -94,12 +112,12 @@ class MainActivity : AppCompatActivity() {
         }
         btnAddWord = MaterialButton(this).apply {
             text = "+ Add Word"
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
             setOnClickListener { showWordDialog(null) }
         }
         btnExport = MaterialButton(this).apply {
             text = "Export"
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(12, 0, 12, 0) }
             setOnClickListener { showExportDialog() }
         }
         btnImport = MaterialButton(this).apply {
@@ -110,7 +128,7 @@ class MainActivity : AppCompatActivity() {
         actionsRow.addView(btnAddWord)
         actionsRow.addView(btnExport)
         actionsRow.addView(btnImport)
-        root.addView(actionsRow)
+        rootLayout.addView(actionsRow)
 
         val scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
@@ -119,9 +137,9 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
         }
         scrollView.addView(wordsContainer)
-        root.addView(scrollView)
+        rootLayout.addView(scrollView)
 
-        setContentView(root)
+        setContentView(rootLayout)
 
         etSearch.addTextChangedListener(object : TextWatcher {
             override fun afterTextChanged(s: Editable?) { renderList(s?.toString()?.trim() ?: "") }
@@ -129,15 +147,43 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
         })
 
-        loadSampleData()
+        applyTheme()
         renderList()
     }
 
-    private fun loadSampleData() {
-        if (wordList.isEmpty()) {
-            wordList.add(WordItem("headland", "/ˈhɛd.lənd/ (noun) — A narrow piece of high land.", mutableListOf("The sea below the headland was rough.")))
-            wordList.add(WordItem("fortnight", "/ˈfɔːt.naɪt/ (noun) — A period of two weeks.", mutableListOf("They spent a fortnight travelling.")))
-            wordList.add(WordItem("unabridged", "", mutableListOf()))
+    private fun applyTheme() {
+        val bg = if (isDarkMode) Color.parseColor("#12110D") else Color.parseColor("#FAF7F0")
+        val cardBg = if (isDarkMode) Color.parseColor("#1C1A14") else Color.parseColor("#FFFFFF")
+        val text = if (isDarkMode) Color.parseColor("#ECE5D8") else Color.parseColor("#14120E")
+        val accent = if (isDarkMode) Color.parseColor("#E2B755") else Color.parseColor("#B8860B")
+        val border = if (isDarkMode) Color.parseColor("#2E2920") else Color.parseColor("#E5DEC9")
+
+        rootLayout.setBackgroundColor(bg)
+        tvTitle.setTextColor(text)
+        btnToggleTheme.setTextColor(accent)
+
+        val searchDrawable = GradientDrawable().apply {
+            setColor(cardBg)
+            cornerRadius = 16f
+            setStroke(2, border)
+        }
+        etSearch.background = searchDrawable
+        etSearch.setTextColor(text)
+        etSearch.setHintTextColor(if (isDarkMode) Color.parseColor("#80796B") else Color.parseColor("#9C9484"))
+
+        val badgeDrawable = GradientDrawable().apply {
+            setColor(if (isDarkMode) Color.parseColor("#2D2413") else Color.parseColor("#FFE9A8"))
+            cornerRadius = 24f
+        }
+        tvCountBadge.background = badgeDrawable
+        tvCountBadge.setTextColor(accent)
+
+        val btnTint = ColorStateList.valueOf(if (isDarkMode) Color.parseColor("#ECE5D8") else Color.parseColor("#14120E"))
+        val btnTextColor = if (isDarkMode) Color.parseColor("#12110D") else Color.parseColor("#FFFFFF")
+        for (b in arrayOf(btnAddWord, btnExport, btnImport)) {
+            b.backgroundTintList = btnTint
+            b.setTextColor(btnTextColor)
+            b.cornerRadius = 16
         }
     }
 
@@ -151,11 +197,18 @@ class MainActivity : AppCompatActivity() {
 
         tvCountBadge.text = "${wordList.size} items"
 
+        val cardBg = if (isDarkMode) Color.parseColor("#1C1A14") else Color.parseColor("#FFFFFF")
+        val textPrimary = if (isDarkMode) Color.parseColor("#ECE5D8") else Color.parseColor("#14120E")
+        val textMuted = if (isDarkMode) Color.parseColor("#9C9484") else Color.parseColor("#655E52")
+        val termColor = if (isDarkMode) Color.parseColor("#E2B755") else Color.parseColor("#B8860B")
+        val border = if (isDarkMode) Color.parseColor("#2E2920") else Color.parseColor("#E5DEC9")
+
         if (filtered.isEmpty()) {
             val empty = TextView(this).apply {
-                text = if (query.isEmpty()) "No words added yet." else "No matches found."
-                setTextColor(Color.parseColor("#9C9484"))
-                setPadding(0, 40, 0, 0)
+                text = if (query.isEmpty()) "No words loaded. Tap Import or + Add Word." else "No matches found."
+                setTextColor(textMuted)
+                textSize = 14f
+                setPadding(0, 48, 0, 0)
             }
             wordsContainer.addView(empty)
             return
@@ -164,11 +217,16 @@ class MainActivity : AppCompatActivity() {
         for (item in filtered) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(Color.WHITE)
-                setPadding(24, 20, 24, 20)
-                val params = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                params.setMargins(0, 0, 0, 16)
+                setPadding(32, 24, 32, 24)
+                val params = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(0, 0, 0, 20)
+                }
                 layoutParams = params
+                background = GradientDrawable().apply {
+                    setColor(cardBg)
+                    cornerRadius = 16f
+                    setStroke(2, border)
+                }
                 isClickable = true
                 setOnClickListener { showWordDialog(item) }
                 setOnLongClickListener {
@@ -181,13 +239,14 @@ class MainActivity : AppCompatActivity() {
                 text = item.term
                 textSize = 18f
                 setTypeface(null, Typeface.BOLD)
-                setTextColor(Color.parseColor("#14120E"))
+                setTextColor(termColor)
             }
             val tvDef = TextView(this).apply {
                 text = if (item.definition.isBlank()) "(No definition recorded)" else item.definition
                 textSize = 14f
-                setTextColor(if (item.definition.isBlank()) Color.parseColor("#9C9484") else Color.parseColor("#443E33"))
-                setPadding(0, 4, 0, 4)
+                setTextColor(if (item.definition.isBlank()) textMuted else textPrimary)
+                setLineSpacing(0f, 1.25f)
+                setPadding(0, 8, 0, 8)
             }
 
             card.addView(tvTerm)
@@ -197,7 +256,8 @@ class MainActivity : AppCompatActivity() {
                 val tvEx = TextView(this).apply {
                     text = "• " + item.examples.joinToString("\n• ")
                     textSize = 13f
-                    setTextColor(Color.parseColor("#655E52"))
+                    setTextColor(textMuted)
+                    setLineSpacing(0f, 1.2f)
                 }
                 card.addView(tvEx)
             }
@@ -206,13 +266,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showWordDialog(existingItem: WordItem?) {
+    private fun showWordDialog(existingItem: LexiItem?) {
         val form = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(40, 20, 40, 20)
+            setPadding(48, 24, 48, 24)
         }
         val etT = EditText(this).apply { hint = "Word / Term"; existingItem?.let { setText(it.term) } }
-        val etD = EditText(this).apply { hint = "Definition"; existingItem?.let { setText(it.definition) } }
+        val etD = EditText(this).apply { hint = "Definition"; existingItem?.let { setText(it.definition) }; minLines = 2 }
         val etEx = EditText(this).apply {
             hint = "Example sentences (one per line)"
             existingItem?.let { setText(it.examples.joinToString("\n")) }
@@ -236,7 +296,7 @@ class MainActivity : AppCompatActivity() {
                 val exLines = etEx.text.toString().split("\n").map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
 
                 if (existingItem == null) {
-                    wordList.add(WordItem(term, def, exLines))
+                    wordList.add(0, LexiItem(term = term, definition = def, examples = exLines))
                 } else {
                     existingItem.term = term
                     existingItem.definition = def
@@ -247,18 +307,15 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("Cancel", null)
 
         if (existingItem != null) {
-            builder.setNeutralButton("Delete") { _, _ ->
-                confirmDelete(existingItem)
-            }
+            builder.setNeutralButton("Delete") { _, _ -> confirmDelete(existingItem) }
         }
-
         builder.show()
     }
 
-    private fun confirmDelete(item: WordItem) {
+    private fun confirmDelete(item: LexiItem) {
         AlertDialog.Builder(this)
             .setTitle("Confirm Deletion")
-            .setMessage("Are you sure you want to delete \"" + item.term + "\"?")
+            .setMessage("Do you want to delete \"" + item.term + "\"?")
             .setPositiveButton("Delete") { _, _ ->
                 wordList.remove(item)
                 renderList(etSearch.text?.toString()?.trim() ?: "")
@@ -269,26 +326,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showExportDialog() {
-        val incompleteCount = wordList.count { it.definition.isBlank() || it.examples.isEmpty() }
+        val incomplete = wordList.count { it.definition.isBlank() || it.examples.isEmpty() }
         val options: Array<CharSequence> = arrayOf(
             "Export All Items (" + wordList.size + ")",
-            "Export Incomplete Only (" + incompleteCount + " missing def/ex)"
+            "Export Incomplete Only (" + incomplete + " missing def/ex)"
         )
 
         AlertDialog.Builder(this)
-            .setTitle("Export Lexicon")
+            .setTitle("Export Options")
             .setItems(options) { _, which ->
-                if (which == 0) {
-                    exportIncompleteOnly = false
-                    exportJsonLauncher.launch("lexicon_all.json")
-                } else {
-                    if (incompleteCount == 0) {
-                        Toast.makeText(this, "All items are already complete!", Toast.LENGTH_SHORT).show()
-                        return@setItems
-                    }
-                    exportIncompleteOnly = true
-                    exportJsonLauncher.launch("lexicon_incomplete.json")
-                }
+                exportIncompleteOnly = (which == 1)
+                val suffix = if (exportIncompleteOnly) "incomplete" else "all"
+                exportJsonLauncher.launch("lexicon_" + suffix + ".json")
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -302,10 +351,17 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     wordList
                 }
-                val json = gson.toJson(targetList)
-                stream.write(json.toByteArray())
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                val exportData = LexiExport(
+                    schemaVersion = 1,
+                    exportedAt = sdf.format(Date()),
+                    items = targetList
+                )
+                stream.write(gson.toJson(exportData).toByteArray())
                 val mode = if (exportIncompleteOnly) "incomplete items" else "all items"
-                Toast.makeText(this, "Exported $mode successfully", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Exported " + targetList.size + " " + mode, Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
             Toast.makeText(this, "Export failed", Toast.LENGTH_SHORT).show()
@@ -317,10 +373,12 @@ class MainActivity : AppCompatActivity() {
             contentResolver.openInputStream(uri)?.use { stream ->
                 val reader = BufferedReader(InputStreamReader(stream))
                 val json = reader.readText()
-                val itemType = object : TypeToken<MutableList<WordItem>>() {}.type
-                val imported: MutableList<WordItem> = gson.fromJson(json, itemType)
-                if (imported.isNotEmpty()) {
-                    for (imp in imported) {
+                val parsed = gson.fromJson(json, LexiExport::class.java)
+                val items = parsed?.items ?: emptyList()
+
+                if (items.isNotEmpty()) {
+                    var added = 0
+                    for (imp in items) {
                         val existing = wordList.find { it.term.equals(imp.term, ignoreCase = true) }
                         if (existing != null) {
                             if (imp.definition.isNotBlank()) existing.definition = imp.definition
@@ -329,14 +387,17 @@ class MainActivity : AppCompatActivity() {
                             }
                         } else {
                             wordList.add(imp)
+                            added++
                         }
                     }
                     renderList(etSearch.text?.toString()?.trim() ?: "")
-                    Toast.makeText(this, "Imported ${imported.size} items", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Loaded " + items.size + " words (" + added + " new)", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "No items found in JSON", Toast.LENGTH_SHORT).show()
                 }
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "Failed to import JSON", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Failed to read file", Toast.LENGTH_SHORT).show()
         }
     }
 }

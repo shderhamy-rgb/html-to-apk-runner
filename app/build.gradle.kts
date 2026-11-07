@@ -8,7 +8,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.lexikeep.vocabulary"
+        applicationId = "com.derhamy.lexikeep"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
