@@ -1,0 +1,98 @@
+﻿
+<!-- Selective Export Modal & Styles -->
+<style>
+.modal-backdrop{display:none;position:fixed;inset:0;background:rgba(18,19,22,0.75);backdrop-filter:blur(4px);z-index:1000;align-items:flex-end;justify-content:center}
+.modal-backdrop.open{display:flex}
+.modal-content{background:#1C1F26;border:1px solid #2B2F3A;border-bottom:none;border-radius:16px 16px 0 0;width:100%;max-width:480px;padding:20px;box-shadow:0 -8px 24px rgba(0,0,0,0.4);animation:lexiconSlideUp 0.2s ease-out}
+@keyframes lexiconSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.modal-header h3{color:#F0F2F5;font-size:1.1rem;margin:0;font-family:inherit}
+.close-btn{background:transparent;border:none;color:#7A8194;font-size:1.5rem;cursor:pointer;line-height:1}
+.option-btn{width:100%;text-align:left;background:#121316;border:1px solid #2B2F3A;border-radius:10px;padding:14px 16px;margin-bottom:12px;cursor:pointer;display:block}
+.option-btn:hover{border-color:#E2B93D;background:#16181E}
+.option-btn.accent{border-left:3px solid #E2B93D}
+.option-title{color:#F0F2F5;font-weight:600;font-size:0.95rem}
+.option-desc{color:#7A8194;font-size:0.8rem;margin-top:4px}
+</style>
+
+<div id="export-modal" class="modal-backdrop" onclick="closeExportMenu()">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3>Export Vocabulary</h3>
+      <button class="close-btn" onclick="closeExportMenu()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <button class="option-btn" onclick="runExport('all')">
+        <div class="option-title">Export All Items</div>
+        <div class="option-desc">Complete database with definitions and examples</div>
+      </button>
+      <button class="option-btn accent" onclick="runExport('incomplete')">
+        <div class="option-title">Export Incomplete Items Only</div>
+        <div class="option-desc">Only items missing definitions or examples</div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+function isItemIncomplete(item) {
+  const cleanDef = (item.definition || '').replace(/^\([a-zA-Z\s.-]*\)\s*/, '').trim();
+  const hasExamples = Array.isArray(item.examples) && item.examples.some(ex => typeof ex === 'string' && ex.trim().length > 0);
+  return cleanDef.length === 0 || !hasExamples;
+}
+
+function exportVocabulary(mode) {
+  const allItems = window.lexiconItems || [];
+  const itemsToExport = mode === 'incomplete' ? allItems.filter(isItemIncomplete) : allItems;
+  const fileSuffix = mode === 'incomplete' ? 'pending-fill' : 'full';
+
+  if (!itemsToExport.length) {
+    if (typeof showToast === 'function') showToast(mode === 'incomplete' ? 'No incomplete items found.' : 'Vocabulary is empty.');
+    return;
+  }
+
+  const payload = { schemaVersion: 1, exportedAt: new Date().toISOString(), items: itemsToExport };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `lexicon-${fileSuffix}-${new Date().toISOString().split('T')[0]}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function toggleExportMenu() {
+  document.getElementById('export-modal')?.classList.toggle('open');
+}
+
+function closeExportMenu() {
+  document.getElementById('export-modal')?.classList.remove('open');
+}
+
+function runExport(mode) {
+  closeExportMenu();
+  exportVocabulary(mode);
+}
+
+function mergeImportedItems(incomingItems) {
+  const currentItems = window.lexiconItems || [];
+  const itemMap = new Map(currentItems.map(item => [item.id, item]));
+  incomingItems.forEach(item => {
+    if (itemMap.has(item.id)) {
+      itemMap.set(item.id, {
+        ...itemMap.get(item.id),
+        term: item.term || itemMap.get(item.id).term,
+        definition: item.definition || itemMap.get(item.id).definition,
+        examples: (item.examples && item.examples.length) ? item.examples : itemMap.get(item.id).examples
+      });
+    } else {
+      itemMap.set(item.id, item);
+    }
+  });
+  window.lexiconItems = Array.from(itemMap.values());
+  if (typeof saveToCache === 'function') saveToCache();
+  if (typeof renderList === 'function') renderList();
+}
+</script>
