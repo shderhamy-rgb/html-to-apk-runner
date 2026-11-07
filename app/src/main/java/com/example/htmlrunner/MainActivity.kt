@@ -9,7 +9,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
-import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -17,6 +16,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.text.SimpleDateFormat
 import java.util.*
@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
 
     private val wordList = mutableListOf<LexiItem>()
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
+    private val localStoreFileName = "vocab_store.json"
     private var isDarkMode = true
     private var exportIncompleteOnly = false
 
@@ -147,8 +148,42 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
         })
 
+        loadPersistedWords()
         applyTheme()
         renderList()
+    }
+
+    private fun loadPersistedWords() {
+        val file = File(filesDir, localStoreFileName)
+        if (file.exists()) {
+            try {
+                val json = file.readText()
+                val parsed = gson.fromJson(json, LexiExport::class.java)
+                if (parsed != null && parsed.items.isNotEmpty()) {
+                    wordList.clear()
+                    wordList.addAll(parsed.items)
+                }
+            } catch (e: Exception) {
+                // Ignore parse errors on empty or initial store
+            }
+        }
+    }
+
+    private fun persistWordsLocally() {
+        try {
+            val file = File(filesDir, localStoreFileName)
+            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val payload = LexiExport(
+                schemaVersion = 1,
+                exportedAt = sdf.format(Date()),
+                items = wordList
+            )
+            file.writeText(gson.toJson(payload))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Failed to save state locally", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun applyTheme() {
@@ -205,7 +240,7 @@ class MainActivity : AppCompatActivity() {
 
         if (filtered.isEmpty()) {
             val empty = TextView(this).apply {
-                text = if (query.isEmpty()) "No words loaded. Tap Import or + Add Word." else "No matches found."
+                text = if (query.isEmpty()) "No words saved. Tap Import or + Add Word." else "No matches found."
                 setTextColor(textMuted)
                 textSize = 14f
                 setPadding(0, 48, 0, 0)
@@ -242,9 +277,9 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(termColor)
             }
             val tvDef = TextView(this).apply {
-                text = if (item.definition.isBlank()) "(No definition recorded)" else item.definition
+                text = if (item.definition.isBlank()) "(Pending definition)" else item.definition
                 textSize = 14f
-                setTextColor(if (item.definition.isBlank()) textMuted else textPrimary)
+                setTextColor(if (item.definition.isBlank()) Color.parseColor("#D9822B") else textPrimary)
                 setLineSpacing(0f, 1.25f)
                 setPadding(0, 8, 0, 8)
             }
@@ -302,6 +337,7 @@ class MainActivity : AppCompatActivity() {
                     existingItem.definition = def
                     existingItem.examples = exLines
                 }
+                persistWordsLocally()
                 renderList(etSearch.text?.toString()?.trim() ?: "")
             }
             .setNegativeButton("Cancel", null)
@@ -318,6 +354,7 @@ class MainActivity : AppCompatActivity() {
             .setMessage("Do you want to delete \"" + item.term + "\"?")
             .setPositiveButton("Delete") { _, _ ->
                 wordList.remove(item)
+                persistWordsLocally()
                 renderList(etSearch.text?.toString()?.trim() ?: "")
                 Toast.makeText(this, "Deleted " + item.term, Toast.LENGTH_SHORT).show()
             }
@@ -329,14 +366,14 @@ class MainActivity : AppCompatActivity() {
         val incomplete = wordList.count { it.definition.isBlank() || it.examples.isEmpty() }
         val options: Array<CharSequence> = arrayOf(
             "Export All Items (" + wordList.size + ")",
-            "Export Incomplete Only (" + incomplete + " missing def/ex)"
+            "Export Impending / Incomplete Only (" + incomplete + " pending)"
         )
 
         AlertDialog.Builder(this)
             .setTitle("Export Options")
             .setItems(options) { _, which ->
                 exportIncompleteOnly = (which == 1)
-                val suffix = if (exportIncompleteOnly) "incomplete" else "all"
+                val suffix = if (exportIncompleteOnly) "pending" else "all"
                 exportJsonLauncher.launch("lexicon_" + suffix + ".json")
             }
             .setNegativeButton("Cancel", null)
@@ -360,7 +397,7 @@ class MainActivity : AppCompatActivity() {
                     items = targetList
                 )
                 stream.write(gson.toJson(exportData).toByteArray())
-                val mode = if (exportIncompleteOnly) "incomplete items" else "all items"
+                val mode = if (exportIncompleteOnly) "pending items" else "all items"
                 Toast.makeText(this, "Exported " + targetList.size + " " + mode, Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
@@ -377,27 +414,47 @@ class MainActivity : AppCompatActivity() {
                 val items = parsed?.items ?: emptyList()
 
                 if (items.isNotEmpty()) {
-                    var added = 0
+                    var updatedCount = 0
+                    var addedCount = 0
+
                     for (imp in items) {
-                        val existing = wordList.find { it.term.equals(imp.term, ignoreCase = true) }
-                        if (existing != null) {
-                            if (imp.definition.isNotBlank()) existing.definition = imp.definition
-                            for (ex in imp.examples) {
-                                if (!existing.examples.contains(ex)) existing.examples.add(ex)
+                        // Match either by stable id or case-insensitive term
+                        val existingIndex = wordList.indexOfFirst {
+                            (it.id.isNotBlank() && it.id == imp.id) ||
+                            it.term.equals(imp.term, ignoreCase = true)
+                        }
+
+                        if (existingIndex != -1) {
+                            val target = wordList[existingIndex]
+                            if (imp.definition.isNotBlank()) {
+                                target.definition = imp.definition
                             }
+                            if (imp.examples.isNotEmpty()) {
+                                target.examples = imp.examples
+                            }
+                            if (imp.term.isNotBlank()) {
+                                target.term = imp.term
+                            }
+                            updatedCount++
                         } else {
                             wordList.add(imp)
-                            added++
+                            addedCount++
                         }
                     }
+
+                    persistWordsLocally()
                     renderList(etSearch.text?.toString()?.trim() ?: "")
-                    Toast.makeText(this, "Loaded " + items.size + " words (" + added + " new)", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        this,
+                        "Merged: $updatedCount replaced/updated, $addedCount new words saved",
+                        Toast.LENGTH_LONG
+                    ).show()
                 } else {
-                    Toast.makeText(this, "No items found in JSON", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "No valid items found in JSON", Toast.LENGTH_SHORT).show()
                 }
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "Failed to read file", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Failed to read or parse file", Toast.LENGTH_SHORT).show()
         }
     }
 }
