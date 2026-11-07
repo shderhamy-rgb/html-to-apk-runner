@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -37,19 +38,31 @@ data class LexiItem(
 class MainActivity : AppCompatActivity() {
 
     private val wordList = mutableListOf<LexiItem>()
+    private val selectedIds = mutableSetOf<String>()
+    private var isSelectionMode = false
+
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
     private val localStoreFileName = "vocab_store.json"
     private var isDarkMode = true
-    private var exportIncompleteOnly = false
+
+    // Export mode state: 0 = all, 1 = pending only, 2 = custom selected
+    private var exportMode = 0
 
     private lateinit var rootLayout: LinearLayout
     private lateinit var tvTitle: TextView
     private lateinit var tvCountBadge: TextView
     private lateinit var btnToggleTheme: MaterialButton
     private lateinit var etSearch: EditText
+    private lateinit var actionsRow: LinearLayout
     private lateinit var btnAddWord: MaterialButton
     private lateinit var btnExport: MaterialButton
     private lateinit var btnImport: MaterialButton
+
+    private lateinit var selectionBar: LinearLayout
+    private lateinit var tvSelectionCount: TextView
+    private lateinit var btnExportSelected: MaterialButton
+    private lateinit var btnCancelSelection: MaterialButton
+
     private lateinit var wordsContainer: LinearLayout
 
     private val exportJsonLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
@@ -68,6 +81,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(36, 48, 36, 32)
         }
 
+        // Header
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, 20)
@@ -97,6 +111,7 @@ class MainActivity : AppCompatActivity() {
         header.addView(btnToggleTheme)
         rootLayout.addView(header)
 
+        // Search Bar
         etSearch = EditText(this).apply {
             hint = "Search terms, definitions, examples..."
             textSize = 14f
@@ -107,7 +122,8 @@ class MainActivity : AppCompatActivity() {
         }
         rootLayout.addView(etSearch)
 
-        val actionsRow = LinearLayout(this).apply {
+        // Standard Actions
+        actionsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, 24)
         }
@@ -130,6 +146,39 @@ class MainActivity : AppCompatActivity() {
         actionsRow.addView(btnExport)
         actionsRow.addView(btnImport)
         rootLayout.addView(actionsRow)
+
+        // Selection Action Bar (hidden by default)
+        selectionBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, 24)
+            visibility = View.GONE
+        }
+        tvSelectionCount = TextView(this).apply {
+            textSize = 15f
+            setTypeface(null, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        btnExportSelected = MaterialButton(this).apply {
+            text = "Export (0)"
+            setOnClickListener {
+                if (selectedIds.isEmpty()) {
+                    Toast.makeText(this@MainActivity, "No items selected", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                exportMode = 2
+                exportJsonLauncher.launch("lexicon_selected.json")
+            }
+        }
+        btnCancelSelection = MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
+            text = "Cancel"
+            setOnClickListener {
+                exitSelectionMode()
+            }
+        }
+        selectionBar.addView(tvSelectionCount)
+        selectionBar.addView(btnExportSelected)
+        selectionBar.addView(btnCancelSelection)
+        rootLayout.addView(selectionBar)
 
         val scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
@@ -163,9 +212,7 @@ class MainActivity : AppCompatActivity() {
                     wordList.clear()
                     wordList.addAll(parsed.items)
                 }
-            } catch (e: Exception) {
-                // Ignore parse errors on empty or initial store
-            }
+            } catch (e: Exception) { }
         }
     }
 
@@ -196,6 +243,7 @@ class MainActivity : AppCompatActivity() {
         rootLayout.setBackgroundColor(bg)
         tvTitle.setTextColor(text)
         btnToggleTheme.setTextColor(accent)
+        tvSelectionCount.setTextColor(text)
 
         val searchDrawable = GradientDrawable().apply {
             setColor(cardBg)
@@ -215,11 +263,36 @@ class MainActivity : AppCompatActivity() {
 
         val btnTint = ColorStateList.valueOf(if (isDarkMode) Color.parseColor("#ECE5D8") else Color.parseColor("#14120E"))
         val btnTextColor = if (isDarkMode) Color.parseColor("#12110D") else Color.parseColor("#FFFFFF")
-        for (b in arrayOf(btnAddWord, btnExport, btnImport)) {
+        for (b in arrayOf(btnAddWord, btnExport, btnImport, btnExportSelected)) {
             b.backgroundTintList = btnTint
             b.setTextColor(btnTextColor)
             b.cornerRadius = 16
         }
+        btnCancelSelection.setTextColor(accent)
+    }
+
+    private fun enterSelectionMode(initialSelectedId: String) {
+        isSelectionMode = true
+        selectedIds.clear()
+        selectedIds.add(initialSelectedId)
+        actionsRow.visibility = View.GONE
+        selectionBar.visibility = View.VISIBLE
+        updateSelectionUI()
+        renderList(etSearch.text?.toString()?.trim() ?: "")
+    }
+
+    private fun exitSelectionMode() {
+        isSelectionMode = false
+        selectedIds.clear()
+        selectionBar.visibility = View.GONE
+        actionsRow.visibility = View.VISIBLE
+        renderList(etSearch.text?.toString()?.trim() ?: "")
+    }
+
+    private fun updateSelectionUI() {
+        val count = selectedIds.size
+        tvSelectionCount.text = "$count selected"
+        btnExportSelected.text = "Export ($count)"
     }
 
     private fun renderList(query: String = "") {
@@ -233,10 +306,12 @@ class MainActivity : AppCompatActivity() {
         tvCountBadge.text = "${wordList.size} items"
 
         val cardBg = if (isDarkMode) Color.parseColor("#1C1A14") else Color.parseColor("#FFFFFF")
+        val selectedCardBg = if (isDarkMode) Color.parseColor("#2D2513") else Color.parseColor("#FFF3D1")
         val textPrimary = if (isDarkMode) Color.parseColor("#ECE5D8") else Color.parseColor("#14120E")
         val textMuted = if (isDarkMode) Color.parseColor("#9C9484") else Color.parseColor("#655E52")
         val termColor = if (isDarkMode) Color.parseColor("#E2B755") else Color.parseColor("#B8860B")
         val border = if (isDarkMode) Color.parseColor("#2E2920") else Color.parseColor("#E5DEC9")
+        val selectedBorder = if (isDarkMode) Color.parseColor("#E2B755") else Color.parseColor("#B8860B")
 
         if (filtered.isEmpty()) {
             val empty = TextView(this).apply {
@@ -250,6 +325,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         for (item in filtered) {
+            val isChecked = selectedIds.contains(item.id)
+
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(32, 24, 32, 24)
@@ -258,16 +335,45 @@ class MainActivity : AppCompatActivity() {
                 }
                 layoutParams = params
                 background = GradientDrawable().apply {
-                    setColor(cardBg)
+                    setColor(if (isChecked) selectedCardBg else cardBg)
                     cornerRadius = 16f
-                    setStroke(2, border)
+                    setStroke(if (isChecked) 3 else 2, if (isChecked) selectedBorder else border)
                 }
                 isClickable = true
-                setOnClickListener { showWordDialog(item) }
+                setOnClickListener {
+                    if (isSelectionMode) {
+                        if (isChecked) selectedIds.remove(item.id) else selectedIds.add(item.id)
+                        if (selectedIds.isEmpty()) {
+                            exitSelectionMode()
+                        } else {
+                            updateSelectionUI()
+                            renderList(etSearch.text?.toString()?.trim() ?: "")
+                        }
+                    } else {
+                        showWordDialog(item)
+                    }
+                }
                 setOnLongClickListener {
-                    confirmDelete(item)
+                    if (!isSelectionMode) {
+                        enterSelectionMode(item.id)
+                    } else {
+                        confirmDelete(item)
+                    }
                     true
                 }
+            }
+
+            val topRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+            }
+
+            if (isSelectionMode) {
+                val cb = CheckBox(this).apply {
+                    this.isChecked = isChecked
+                    isClickable = false
+                    buttonTintList = ColorStateList.valueOf(termColor)
+                }
+                topRow.addView(cb)
             }
 
             val tvTerm = TextView(this).apply {
@@ -275,7 +381,11 @@ class MainActivity : AppCompatActivity() {
                 textSize = 18f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(termColor)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
+            topRow.addView(tvTerm)
+            card.addView(topRow)
+
             val tvDef = TextView(this).apply {
                 text = if (item.definition.isBlank()) "(Pending definition)" else item.definition
                 textSize = 14f
@@ -283,8 +393,6 @@ class MainActivity : AppCompatActivity() {
                 setLineSpacing(0f, 1.25f)
                 setPadding(0, 8, 0, 8)
             }
-
-            card.addView(tvTerm)
             card.addView(tvDef)
 
             if (item.examples.isNotEmpty()) {
@@ -354,6 +462,7 @@ class MainActivity : AppCompatActivity() {
             .setMessage("Do you want to delete \"" + item.term + "\"?")
             .setPositiveButton("Delete") { _, _ ->
                 wordList.remove(item)
+                selectedIds.remove(item.id)
                 persistWordsLocally()
                 renderList(etSearch.text?.toString()?.trim() ?: "")
                 Toast.makeText(this, "Deleted " + item.term, Toast.LENGTH_SHORT).show()
@@ -366,15 +475,30 @@ class MainActivity : AppCompatActivity() {
         val incomplete = wordList.count { it.definition.isBlank() || it.examples.isEmpty() }
         val options: Array<CharSequence> = arrayOf(
             "Export All Items (" + wordList.size + ")",
-            "Export Impending / Incomplete Only (" + incomplete + " pending)"
+            "Export Pending / Incomplete Only (" + incomplete + " pending)",
+            "Enter Multi-Select Mode..."
         )
 
         AlertDialog.Builder(this)
-            .setTitle("Export Options")
+            .setTitle("Export Lexicon")
             .setItems(options) { _, which ->
-                exportIncompleteOnly = (which == 1)
-                val suffix = if (exportIncompleteOnly) "pending" else "all"
-                exportJsonLauncher.launch("lexicon_" + suffix + ".json")
+                when (which) {
+                    0 -> {
+                        exportMode = 0
+                        exportJsonLauncher.launch("lexicon_all.json")
+                    }
+                    1 -> {
+                        exportMode = 1
+                        exportJsonLauncher.launch("lexicon_pending.json")
+                    }
+                    2 -> {
+                        if (wordList.isNotEmpty()) {
+                            enterSelectionMode(wordList[0].id)
+                        } else {
+                            Toast.makeText(this, "No words available to select", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -383,10 +507,10 @@ class MainActivity : AppCompatActivity() {
     private fun saveExportFile(uri: Uri) {
         try {
             contentResolver.openOutputStream(uri)?.use { stream ->
-                val targetList = if (exportIncompleteOnly) {
-                    wordList.filter { it.definition.isBlank() || it.examples.isEmpty() }
-                } else {
-                    wordList
+                val targetList = when (exportMode) {
+                    1 -> wordList.filter { it.definition.isBlank() || it.examples.isEmpty() }
+                    2 -> wordList.filter { selectedIds.contains(it.id) }
+                    else -> wordList
                 }
                 val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
                     timeZone = TimeZone.getTimeZone("UTC")
@@ -397,8 +521,13 @@ class MainActivity : AppCompatActivity() {
                     items = targetList
                 )
                 stream.write(gson.toJson(exportData).toByteArray())
-                val mode = if (exportIncompleteOnly) "pending items" else "all items"
-                Toast.makeText(this, "Exported " + targetList.size + " " + mode, Toast.LENGTH_SHORT).show()
+                val modeLabel = when (exportMode) {
+                    1 -> "pending items"
+                    2 -> "selected items"
+                    else -> "all items"
+                }
+                Toast.makeText(this, "Exported " + targetList.size + " " + modeLabel, Toast.LENGTH_SHORT).show()
+                if (exportMode == 2) exitSelectionMode()
             }
         } catch (e: Exception) {
             Toast.makeText(this, "Export failed", Toast.LENGTH_SHORT).show()
@@ -411,50 +540,70 @@ class MainActivity : AppCompatActivity() {
                 val reader = BufferedReader(InputStreamReader(stream))
                 val json = reader.readText()
                 val parsed = gson.fromJson(json, LexiExport::class.java)
-                val items = parsed?.items ?: emptyList()
+                val incomingItems = parsed?.items ?: emptyList()
 
-                if (items.isNotEmpty()) {
-                    var updatedCount = 0
-                    var addedCount = 0
-
-                    for (imp in items) {
-                        // Match either by stable id or case-insensitive term
-                        val existingIndex = wordList.indexOfFirst {
-                            (it.id.isNotBlank() && it.id == imp.id) ||
-                            it.term.equals(imp.term, ignoreCase = true)
-                        }
-
-                        if (existingIndex != -1) {
-                            val target = wordList[existingIndex]
-                            if (imp.definition.isNotBlank()) {
-                                target.definition = imp.definition
-                            }
-                            if (imp.examples.isNotEmpty()) {
-                                target.examples = imp.examples
-                            }
-                            if (imp.term.isNotBlank()) {
-                                target.term = imp.term
-                            }
-                            updatedCount++
-                        } else {
-                            wordList.add(imp)
-                            addedCount++
-                        }
-                    }
-
-                    persistWordsLocally()
-                    renderList(etSearch.text?.toString()?.trim() ?: "")
-                    Toast.makeText(
-                        this,
-                        "Merged: $updatedCount replaced/updated, $addedCount new words saved",
-                        Toast.LENGTH_LONG
-                    ).show()
-                } else {
-                    Toast.makeText(this, "No valid items found in JSON", Toast.LENGTH_SHORT).show()
+                if (incomingItems.isEmpty()) {
+                    Toast.makeText(this, "No items found in JSON", Toast.LENGTH_SHORT).show()
+                    return
                 }
+
+                // Show selective import dialog
+                showSelectiveImportDialog(incomingItems)
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "Failed to read or parse file", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Failed to read file", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun showSelectiveImportDialog(incomingItems: List<LexiItem>) {
+        val displayItems = incomingItems.map { it.term + if (it.definition.isNotBlank()) " (defined)" else " (pending)" }.toTypedArray()
+        val checkedState = BooleanArray(incomingItems.size) { true }
+
+        AlertDialog.Builder(this)
+            .setTitle("Select Items to Import (" + incomingItems.size + ")")
+            .setMultiChoiceItems(displayItems, checkedState) { _, which, isChecked ->
+                checkedState[which] = isChecked
+            }
+            .setPositiveButton("Import Selected") { _, _ ->
+                val chosenItems = incomingItems.filterIndexed { index, _ -> checkedState[index] }
+                applyImportedItems(chosenItems)
+            }
+            .setNeutralButton("Select All") { dialog, _ ->
+                applyImportedItems(incomingItems)
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun applyImportedItems(itemsToMerge: List<LexiItem>) {
+        var updatedCount = 0
+        var addedCount = 0
+
+        for (imp in itemsToMerge) {
+            val existingIndex = wordList.indexOfFirst {
+                (it.id.isNotBlank() && it.id == imp.id) ||
+                it.term.equals(imp.term, ignoreCase = true)
+            }
+
+            if (existingIndex != -1) {
+                val target = wordList[existingIndex]
+                if (imp.definition.isNotBlank()) target.definition = imp.definition
+                if (imp.examples.isNotEmpty()) target.examples = imp.examples
+                if (imp.term.isNotBlank()) target.term = imp.term
+                updatedCount++
+            } else {
+                wordList.add(imp)
+                addedCount++
+            }
+        }
+
+        persistWordsLocally()
+        renderList(etSearch.text?.toString()?.trim() ?: "")
+        Toast.makeText(
+            this,
+            "Imported: $updatedCount replaced/updated, $addedCount new added",
+            Toast.LENGTH_LONG
+        ).show()
     }
 }
