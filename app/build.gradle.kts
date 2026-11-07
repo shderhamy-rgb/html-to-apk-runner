@@ -8,7 +8,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.margin.studio"
+        applicationId = "com.lexikeep.vocabulary"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
